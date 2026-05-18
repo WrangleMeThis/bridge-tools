@@ -70,19 +70,28 @@ export function composeBrief(
   };
 
   let placement: PaneNearResult | undefined;
-  if (opts.placement && "near" in opts.placement && !opts.placement.detached) {
+  const p = opts.placement;
+  if (p && "detached" in p && p.detached) {
+    notes.push("Placement is detached — no pane will be created.");
+  } else if (p && "near" in p) {
     try {
       placement = paneNear(
-        { near: opts.placement.near, direction: opts.placement.direction },
+        { near: p.near, direction: p.direction },
         { orchestrator: deps.orchestrator },
       );
     } catch (e) {
       notes.push(`Placement preview failed: ${(e as Error).message}`);
     }
-  } else if (opts.placement && opts.placement.detached) {
-    notes.push("Placement is detached — no pane will be created.");
-  } else if (opts.placement) {
-    notes.push("Placement variant not previewable in v0.2.0 (only RelativePlacement wired).");
+  } else if (p && "relative_to" in p) {
+    notes.push(
+      `Explicit placement: pane will be created in tab '${p.tab}' ${p.direction} of '${p.relative_to}'.`,
+    );
+  } else if (p && "new_tab" in p) {
+    notes.push(`New tab placement: tab '${p.new_tab}' will be created with a default pane.`);
+  } else if (p && "new_workspace" in p) {
+    notes.push(
+      `New workspace placement: workspace/tab '${p.new_workspace}' will be created with a default pane.`,
+    );
   }
 
   return {

@@ -112,27 +112,56 @@ export async function spawn(
     ...(opts.env ?? {}),
   };
 
-  // 4. Resolve placement → splitInCallerWorkspace. v1 only handles the
-  //    relative variant; others throw until v0.3.
+  // 4. Resolve placement. Four variants supported:
+  //    - RelativePlacement: split caller's pane (handled inline by launchAgent's splitInCallerWorkspace)
+  //    - ExplicitPlacement: pane inside a specific tab — created POST-launch, then attachAgent
+  //    - NewTabPlacement: new tab in (current) workspace — created POST-launch, then attachAgent
+  //    - NewWorkspacePlacement: new workspace (cmux) / window (iTerm) — approximated as a new tab POST-launch
+  //
+  // Detached (any variant): skip pane creation/attach entirely.
   const placement = opts.placement;
+  const detached = placement && "detached" in placement && placement.detached === true;
   let split: { direction: "right" | "down" } | undefined;
-  if (placement) {
+  // Post-launch placement: { tab name to attach to, optional pane name to attach to }
+  let post_launch_attach: { tab: string; pane?: string } | undefined;
+
+  if (placement && !detached) {
     if ("near" in placement) {
-      if (placement.detached) {
-        split = undefined;
-      } else if (placement.direction === "right" || placement.direction === "left") {
-        split = { direction: "right" };
-      } else {
-        split = { direction: "down" };
+      split = {
+        direction:
+          placement.direction === "right" || placement.direction === "left" ? "right" : "down",
+      };
+    } else if ("relative_to" in placement) {
+      const tab = deps.orchestrator.store.getTab(placement.tab);
+      if (!tab) throw new Error(`spawn: explicit placement tab '${placement.tab}' does not exist`);
+      const anchor = deps.orchestrator.store.getPane(placement.relative_to);
+      if (!anchor || anchor.tab !== placement.tab) {
+        throw new Error(
+          `spawn: explicit placement anchor pane '${placement.relative_to}' not found in tab '${placement.tab}'`,
+        );
       }
-    } else {
-      throw new Error(
-        `spawn: placement variant not yet implemented in v0.2.0 (${JSON.stringify(placement)}). Only RelativePlacement (near+direction) is wired so far.`,
+      const new_pane = await deps.orchestrator.createPane(
+        placement.tab,
+        undefined,
+        placement.direction === "right" || placement.direction === "left" ? "right" : "below",
+        placement.relative_to,
       );
+      post_launch_attach = { tab: placement.tab, pane: new_pane.name };
+    } else if ("new_tab" in placement) {
+      const tab = await deps.orchestrator.createTab(placement.new_tab);
+      post_launch_attach = { tab: tab.name, pane: tab.pane?.name };
+    } else if ("new_workspace" in placement) {
+      // crew's createTab doubles as workspace creation in cmux; in iTerm it
+      // creates a tab in the current window. Refine if/when crew exposes a
+      // dedicated new-workspace primitive.
+      const tab = await deps.orchestrator.createTab(placement.new_workspace);
+      post_launch_attach = { tab: tab.name, pane: tab.pane?.name };
     }
   }
 
-  // 5. Crew launchAgent.
+  // 5. Crew launchAgent. For RelativePlacement we use splitInCallerWorkspace;
+  //    for other placement variants the pane was pre-created in step 4 and we
+  //    attach POST-launch.
   const launched = await deps.orchestrator.launchAgent({
     env,
     runtime: opts.runtime,
@@ -140,6 +169,18 @@ export async function spawn(
     prompt: opts.task,
     splitInCallerWorkspace: split,
   });
+
+  if (post_launch_attach?.pane) {
+    try {
+      await deps.orchestrator.attachAgent(launched.id, post_launch_attach.pane);
+    } catch (e) {
+      // Attach failure leaves the agent headless. Surface via a thrown error
+      // so the caller can decide whether to handoff() the dangling agent.
+      throw new Error(
+        `spawn: agent ${launched.id} launched but failed to attach to pane '${post_launch_attach.pane}': ${(e as Error).message}. Use handoff() to close cleanly.`,
+      );
+    }
+  }
 
   // 6. Wire-ipc kickoff: send the task brief on bridge.kickoff topic.
   //    If this fails, the agent is alive but unbriefed — return brief_sent=false
