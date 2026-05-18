@@ -21,6 +21,7 @@
   "author": "Tim Garthwaite <https://github.com/mividtim>",
   "dependencies": {
     "@agiterra/crew-tools": "agiterra/crew-tools#v2.10.1",
+    "@agiterra/knowledge-indexer-tools": "agiterra/knowledge-indexer-tools#v1.2.0",
     "@agiterra/knowledge-tools": "agiterra/knowledge-tools#v0.2.3",
     "@agiterra/wire-tools": "agiterra/wire-tools#v2.6.3",
     "@modelcontextprotocol/sdk": "^1.29.0"
