@@ -15,8 +15,7 @@ export type {
   BridgeHookStage,
   BridgeHookContext,
   BridgeHookContribution,
-  MergedRoleManifest,
-  RoleConflict,
+  Role,
   FleetDefaults,
 } from "./types.js";
 

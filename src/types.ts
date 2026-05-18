@@ -80,8 +80,6 @@ export interface BridgeHookContext {
   stage: BridgeHookStage;
   /** The full spawn options (or other composite-call options) the hook can read. */
   spawn?: SpawnOptions;
-  /** Merged role manifest the hook can inspect. */
-  merged_roles?: MergedRoleManifest;
   /** Env map assembled so far. Hook may add to it via return value but should not mutate. */
   env_so_far: Readonly<Record<string, string>>;
 }
@@ -104,28 +102,24 @@ export interface BridgeHook {
   run(ctx: BridgeHookContext): Promise<BridgeHookContribution> | BridgeHookContribution;
 }
 
-/** Merged role manifest produced by the role-composition logic. */
-export interface MergedRoleManifest {
-  roles: string[];
-  capabilities: string[];
-  /** Plugins to apply on the spawned ephemeral. */
-  plugins: string[];
-  /** Vault scope hint. */
-  vault_scope: "per-task" | "per-role" | "per-machine" | string;
-  /** Combined prompt fragment (system message contribution). */
-  prompt_fragment: string;
-  /** Env defaults from the merged roles. */
-  env_defaults: Record<string, string>;
-  /** Conflicts surfaced during merging. Empty array = clean merge. */
-  conflicts: RoleConflict[];
-}
-
-/** A conflict found during role merging. */
-export interface RoleConflict {
-  kind: "prompt_fragment" | "plugins" | "vault_scope" | "env";
-  detail: string;
-  /** Which roles contributed the conflicting values. */
-  roles: string[];
+/**
+ * Optional Role type for orchestrators who want type-safe role-file definitions.
+ *
+ * Role *definitions*, *composition logic*, and *role catalog* are NOT bridge's
+ * responsibility — they belong to the orchestrator (Brioche). This type is
+ * exported only as a convenience for orchestrators who choose to write their
+ * role files in TypeScript and want IDE help. bridge.spawn does not import,
+ * resolve, or merge Role objects.
+ */
+export interface Role {
+  name: string;
+  description: string;
+  capabilities?: string[];
+  plugins?: string[];
+  vault_scope?: "per-task" | "per-role" | "per-machine";
+  prompt_fragment?: string;
+  env_defaults?: Record<string, string>;
+  pre_spawn_hooks?: string[];
 }
 
 /** Fleet defaults stored in wire.db plugin_settings (namespace=`bridge`). */

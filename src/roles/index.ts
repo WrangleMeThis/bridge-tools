@@ -1,20 +1,17 @@
-// Canonical role definitions. Each role contributes:
-//   - prompt fragment (system message addition)
-//   - default plugins to apply on the ephemeral
-//   - capability declarations (e.g., "github") that trigger pre_spawn hooks
-//   - vault scope hint
-//   - env defaults
+// Role definitions are NOT bridge's responsibility.
 //
-// Roles compose. An agent invoked with roles: ["backend-engineer", "solidity-engineer"]
-// gets the union of both, with conflict detection on prompt-fragments / plugins /
-// vault scopes / env defaults.
+// Brioche (and any other orchestrator) owns:
+//   - what roles look like
+//   - where role files live (typically the orchestrator's vault)
+//   - how roles compose (orchestrator assembles the final brief before calling spawn)
 //
-// Add new roles as new .ts files in this directory and re-export from here.
-// External adopters can extend by writing their own bridge-X integration plugin
-// that contributes additional roles via the BridgeHook contract.
+// bridge-tools provides only:
+//   - The optional `Role` TypeScript type so orchestrator role files can be type-safe
+//     (re-exported from "@agiterra/bridge-tools" main entry, not from a registry)
+//
+// bridge.spawn takes a finished `task` brief and a list of `roles` as opaque
+// identifier tags (used for wire identity, audit logs, and forwarding to the
+// spawned worker). bridge does not interpret role names, look them up, or merge
+// fragments — that's the orchestrator's job upstream of spawn.
 
-// (No roles defined yet — v0.1.0 ships with the role-merging machinery but
-// no pre-baked role catalog. Adopters define their own; we'll add canonical
-// Agiterra roles incrementally as the composite tools light up.)
-
-export const ROLES = {} as const;
+export {};
