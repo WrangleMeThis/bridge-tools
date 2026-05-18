@@ -50,16 +50,26 @@ export interface SponsorSpec {
 
 /** Arguments to spawn. */
 export interface SpawnOptions {
-  /** Composition of roles the ephemeral plays. Order matters for merge precedence. */
+  /** Stable identifier for the new agent. Orchestrator-supplied — must be unique on Wire. */
+  agent_id: string;
+  /** Display name. Defaults to `agent_id`. */
+  display_name?: string;
+  /** Opaque role tags — forwarded to the worker via env (`AGENT_ROLES`) and audit logs. Bridge does NOT interpret these; the orchestrator owns role definitions and prompt assembly. */
   roles: string[];
-  /** The brief for the spawned agent — natural language or a structured task object. */
+  /** The fully-assembled task brief. Sent to the new agent via wire-ipc kickoff. */
   task: string;
-  /** Where to place the new pane (and whether to place one at all). Omit → fleet default. */
+  /** Capabilities to dispatch pre_spawn BridgeHooks for. Each capability whose hook is registered runs; missing capabilities are silently skipped. Order is preserved. */
+  capabilities?: string[];
+  /** Where to place the new pane (and whether to place one at all). Omit → headless. */
   placement?: Placement;
   /** Sponsor identity controls. Omit → orchestrator sponsors. */
   sponsor?: SponsorSpec;
-  /** Per-spawn env overrides — for things that vary per spawn (fresh GH tokens, task-specific URLs, feature flags). Takes precedence over role defaults and fleet defaults. */
+  /** Per-spawn env overrides — fresh GH tokens, task-specific URLs, feature flags. Takes precedence over fleet defaults and hook contributions. */
   env?: Record<string, string>;
+  /** Runtime to launch (e.g., "claude", "codex"). Forwarded to crew.launchAgent. */
+  runtime?: string;
+  /** Working directory for the spawned process. Forwarded to crew.launchAgent. */
+  project_dir?: string;
 }
 
 /** Result of a successful spawn. */

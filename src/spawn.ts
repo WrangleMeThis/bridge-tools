@@ -1,52 +1,169 @@
 // spawn — the marquee composite function. Collapses Brioche's 6-skill-call
 // orchestration dance into a single call.
 //
-// Sequence:
-//   1. Resolve placement to a concrete pane spec
-//   2. Run pre_spawn hooks for each required capability (from the runtime registry)
-//      - merges hook env contributions into the spawn env
-//   3. Generate Wire identity for the new ephemeral (sponsor flow)
-//   4. Assemble the final env map: fleet defaults → per-spawn env overrides → hook contributions
-//   5. crew agent_launch with the assembled env
-//   6. pane_create at the resolved position (skip if detached)
-//   7. agent_attach (skip if detached)
-//   8. wire-ipc kickoff with the task brief
+// Sequence executed inside this function:
+//   1. Run pre_spawn BridgeHooks for each declared capability
+//      → collect env contributions from each hook
+//   2. Wire identity: orchestrator sponsors a new keypair for the ephemeral
+//      → receives back the new private key to forward via env
+//   3. Assemble final env: parent identity → hook contributions → per-spawn env
+//      (per-spawn env wins on collisions)
+//   4. crew.launchAgent({env, runtime, prompt: task, splitInCallerWorkspace})
+//      → forwards env to the spawned process, optionally splits caller's pane
+//   5. wire-ipc kickoff: send a signed `bridge.kickoff` envelope to the new
+//      ephemeral carrying the task brief
+//   6. Return SpawnResult with the new agent's id, wire identity, applied
+//      capabilities, and brief-sent flag.
 //
-// Notes on what spawn does NOT do:
-//   - Does NOT interpret `roles` — they're opaque identifier tags passed
-//     through to the worker for its own use (wire identity, audit logs).
-//     Role definitions / merging / prompt assembly are the orchestrator's job
-//     UPSTREAM of spawn. By the time spawn is called, `task` is the finished
-//     brief the worker receives.
-//   - Does NOT mint tokens, fetch tickets, or do anything domain-specific.
-//     Those happen via pre_spawn BridgeHooks contributed by integration plugins
-//     (bridge-github, bridge-linear, etc.).
-//
-// Partial-failure recovery: each step records its progress; if a later step
-// fails, earlier side-effects are unwound in reverse order (agent_close,
-// pane_close, wire identity revocation).
-//
-// v0.1.0 — skeleton. Implementation lands incrementally; first end-to-end target
-// is "spawn ephemeral Codex agent to the right of babka" working.
+// Notes:
+//   - Roles are opaque tags. Forwarded as AGENT_ROLES env var; bridge does not
+//     interpret them. The orchestrator owns prompt assembly upstream of spawn;
+//     by the time we're here, `task` is the finished brief.
+//   - Placement v1: only RelativePlacement is wired (via crew's
+//     splitInCallerWorkspace, supported by cmux). Explicit/new-tab/
+//     new-workspace placement variants throw NotImplementedError until v0.3.
+//   - Partial-failure cleanup: if wire-ipc kickoff fails after the agent
+//     launches, the agent stays alive — the orchestrator can retry kickoff
+//     or close manually. We do NOT auto-close on kickoff failure because the
+//     agent process is already running and may have done useful work.
 
-import type { SpawnOptions, SpawnResult, BridgeHook } from "./types.js";
+import type {
+  SpawnOptions,
+  SpawnResult,
+  BridgeHook,
+  BridgeHookContribution,
+} from "./types.js";
+
+import { Orchestrator } from "@agiterra/crew-tools";
+import {
+  generateKeyPair,
+  exportPrivateKey,
+  registerOrRefresh,
+  sendSignedMessage,
+  type KeyPair,
+} from "@agiterra/wire-tools";
+
+/** Runtime dependencies spawn needs but doesn't own. The MCP adapter constructs these once at boot and passes them in. */
+export interface SpawnDeps {
+  /** Crew orchestrator instance. Holds the terminal backend + state DB. */
+  orchestrator: Orchestrator;
+  /** Wire server URL (e.g., "https://the-wire.ngrok.io"). */
+  wire_url: string;
+  /** Orchestrator's agent ID — used as the sponsoring identity for the new ephemeral. */
+  parent_agent_id: string;
+  /** Orchestrator's signing key — signs the registration request. */
+  parent_signing_key: CryptoKey;
+}
 
 /**
  * Spawn a new agent with the given roles, task, and placement.
  *
- * @param opts spawn arguments — roles (opaque tags), task (finished brief),
- *             optional placement/sponsor/env
- * @param registry pre_spawn BridgeHooks indexed by capability (provided by the MCP adapter)
- * @returns the new agent's id, pane handle, wire identity, and applied capabilities
- *
- * @throws if any spawn step fails after exhausting retries (with unwind of prior steps)
+ * @param opts spawn arguments
+ * @param deps runtime deps (orchestrator, wire url, parent identity + signing key)
+ * @param registry pre_spawn BridgeHooks indexed by capability
+ * @returns the new agent's id, wire identity, applied capabilities, brief-sent flag
  */
 export async function spawn(
   opts: SpawnOptions,
+  deps: SpawnDeps,
   registry: ReadonlyMap<string, BridgeHook>,
 ): Promise<SpawnResult> {
-  // STUB — implementation in progress.
-  void opts;
-  void registry;
-  throw new Error("spawn: not yet implemented (v0.1.0 skeleton)");
+  const new_agent_id = opts.agent_id;
+  const display_name = opts.display_name ?? new_agent_id;
+
+  // 1. Run pre_spawn hooks for declared capabilities.
+  const applied_capabilities: string[] = [];
+  const hook_env: Record<string, string> = {};
+  for (const cap of opts.capabilities ?? []) {
+    const hook = registry.get(cap);
+    if (!hook || hook.stage !== "pre_spawn") continue;
+    const contribution = (await hook.run({
+      capability: cap,
+      stage: "pre_spawn",
+      spawn: opts,
+      env_so_far: hook_env,
+    })) as BridgeHookContribution;
+    Object.assign(hook_env, contribution.env ?? {});
+    applied_capabilities.push(cap);
+  }
+
+  // 2. Wire identity: sponsor a new keypair for the ephemeral.
+  const new_keypair: KeyPair = await generateKeyPair();
+  const new_privkey_b64 = await exportPrivateKey(new_keypair.privateKey);
+  await registerOrRefresh(
+    deps.wire_url,
+    deps.parent_agent_id,
+    deps.parent_signing_key,
+    new_agent_id,
+    display_name,
+    { pubkey: new_keypair.publicKey },
+  );
+
+  // 3. Assemble env. Precedence (lowest → highest): hook contributions,
+  //    bridge-required identity vars, per-spawn env overrides.
+  const env: Record<string, string> = {
+    ...hook_env,
+    AGENT_ID: new_agent_id,
+    AGENT_NAME: display_name,
+    AGENT_PRIVATE_KEY: new_privkey_b64,
+    AGENT_PARENT: opts.sponsor?.parent_identity ?? deps.parent_agent_id,
+    AGENT_ROLES: opts.roles.join(","),
+    WIRE_URL: deps.wire_url,
+    ...(opts.env ?? {}),
+  };
+
+  // 4. Resolve placement → splitInCallerWorkspace. v1 only handles the
+  //    relative variant; others throw until v0.3.
+  const placement = opts.placement;
+  let split: { direction: "right" | "down" } | undefined;
+  if (placement) {
+    if ("near" in placement) {
+      if (placement.detached) {
+        split = undefined;
+      } else if (placement.direction === "right" || placement.direction === "left") {
+        split = { direction: "right" };
+      } else {
+        split = { direction: "down" };
+      }
+    } else {
+      throw new Error(
+        `spawn: placement variant not yet implemented in v0.2.0 (${JSON.stringify(placement)}). Only RelativePlacement (near+direction) is wired so far.`,
+      );
+    }
+  }
+
+  // 5. Crew launchAgent.
+  const launched = await deps.orchestrator.launchAgent({
+    env,
+    runtime: opts.runtime,
+    projectDir: opts.project_dir,
+    prompt: opts.task,
+    splitInCallerWorkspace: split,
+  });
+
+  // 6. Wire-ipc kickoff: send the task brief on bridge.kickoff topic.
+  //    If this fails, the agent is alive but unbriefed — return brief_sent=false
+  //    rather than unwinding (the agent process is real work in flight).
+  let brief_sent = false;
+  try {
+    await sendSignedMessage(
+      deps.wire_url,
+      deps.parent_agent_id,
+      deps.parent_signing_key,
+      "bridge.kickoff",
+      { task: opts.task, roles: opts.roles, applied_capabilities },
+      new_agent_id,
+    );
+    brief_sent = true;
+  } catch (_err) {
+    // Surface the failure via brief_sent=false; caller decides retry.
+    brief_sent = false;
+  }
+
+  return {
+    agent_id: launched.id,
+    wire_identity: new_agent_id,
+    applied_capabilities,
+    brief_sent,
+  };
 }
