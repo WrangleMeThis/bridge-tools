@@ -1,0 +1,140 @@
+// Public types for the BridgeHook contract that integration plugins implement,
+// and for the composite-function inputs/outputs. Integration plugins import
+// from "@agiterra/bridge-tools/types" without pulling in runtime code.
+
+/** Placement geometry — covers crew's full vocabulary, backend-agnostic. */
+export type Placement =
+  | RelativePlacement
+  | ExplicitPlacement
+  | NewTabPlacement
+  | NewWorkspacePlacement;
+
+export interface RelativePlacement {
+  /** Pane or agent name to anchor to. */
+  near: string;
+  /** Side of the anchor to place at. */
+  direction: "right" | "below" | "left" | "above";
+  /** If true, spawn the agent without attaching to a pane (headless sub-agent). */
+  detached?: boolean;
+}
+
+export interface ExplicitPlacement {
+  machine?: string;
+  workspace: string;
+  tab: string;
+  relative_to: string;
+  direction: "right" | "below" | "left" | "above";
+  detached?: boolean;
+}
+
+export interface NewTabPlacement {
+  machine?: string;
+  workspace: string;
+  new_tab: string;
+  detached?: boolean;
+}
+
+export interface NewWorkspacePlacement {
+  machine?: string;
+  new_workspace: string;
+  detached?: boolean;
+}
+
+/** Sponsor key choice for the new ephemeral. */
+export interface SponsorSpec {
+  /** Wire identity that signs the new ephemeral's registration. Defaults to the orchestrator. */
+  identity?: string;
+  /** Override the env var the new ephemeral receives for parent-identity tracking. */
+  parent_identity?: string;
+}
+
+/** Arguments to spawn. */
+export interface SpawnOptions {
+  /** Composition of roles the ephemeral plays. Order matters for merge precedence. */
+  roles: string[];
+  /** The brief for the spawned agent — natural language or a structured task object. */
+  task: string;
+  /** Where to place the new pane (and whether to place one at all). Omit → fleet default. */
+  placement?: Placement;
+  /** Sponsor identity controls. Omit → orchestrator sponsors. */
+  sponsor?: SponsorSpec;
+  /** Per-spawn env overrides — for things that vary per spawn (fresh GH tokens, task-specific URLs, feature flags). Takes precedence over role defaults and fleet defaults. */
+  env?: Record<string, string>;
+}
+
+/** Result of a successful spawn. */
+export interface SpawnResult {
+  agent_id: string;
+  pane_id?: string;
+  pane_name?: string;
+  wire_identity: string;
+  applied_capabilities: string[];
+  brief_sent: boolean;
+}
+
+/** Context passed to a BridgeHook at runtime. */
+export interface BridgeHookContext {
+  /** Capability being requested. */
+  capability: string;
+  /** Stage at which the hook fires. */
+  stage: BridgeHookStage;
+  /** The full spawn options (or other composite-call options) the hook can read. */
+  spawn?: SpawnOptions;
+  /** Merged role manifest the hook can inspect. */
+  merged_roles?: MergedRoleManifest;
+  /** Env map assembled so far. Hook may add to it via return value but should not mutate. */
+  env_so_far: Readonly<Record<string, string>>;
+}
+
+/** Stages at which a BridgeHook can fire. v1 only ships pre_spawn; more later. */
+export type BridgeHookStage = "pre_spawn";
+
+/** Return value from a BridgeHook. */
+export interface BridgeHookContribution {
+  /** Env vars the hook contributes. Merged into the spawn env in capability-iteration order. */
+  env?: Record<string, string>;
+  /** Diagnostic message for logs/compose-brief output. */
+  note?: string;
+}
+
+/** The contract integration plugins implement. */
+export interface BridgeHook {
+  stage: BridgeHookStage;
+  capability: string;
+  run(ctx: BridgeHookContext): Promise<BridgeHookContribution> | BridgeHookContribution;
+}
+
+/** Merged role manifest produced by the role-composition logic. */
+export interface MergedRoleManifest {
+  roles: string[];
+  capabilities: string[];
+  /** Plugins to apply on the spawned ephemeral. */
+  plugins: string[];
+  /** Vault scope hint. */
+  vault_scope: "per-task" | "per-role" | "per-machine" | string;
+  /** Combined prompt fragment (system message contribution). */
+  prompt_fragment: string;
+  /** Env defaults from the merged roles. */
+  env_defaults: Record<string, string>;
+  /** Conflicts surfaced during merging. Empty array = clean merge. */
+  conflicts: RoleConflict[];
+}
+
+/** A conflict found during role merging. */
+export interface RoleConflict {
+  kind: "prompt_fragment" | "plugins" | "vault_scope" | "env";
+  detail: string;
+  /** Which roles contributed the conflicting values. */
+  roles: string[];
+}
+
+/** Fleet defaults stored in wire.db plugin_settings (namespace=`bridge`). */
+export interface FleetDefaults {
+  apply_operator_relay: boolean;
+  default_vault_scope: "per-task" | "per-role" | "per-machine";
+  default_sponsor: "orchestrator" | string;
+  default_backend?: "cmux" | "iterm";
+  default_placement_strategy: "next-available" | "right-of-current" | string;
+  env_defaults: Record<string, string>;
+  conflict_policy: "warn" | "fail";
+}
