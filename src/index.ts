@@ -25,3 +25,5 @@ export { paneNear, type PaneNearOptions, type PaneNearResult, type PaneNearDeps 
 export { close, type CloseOptions, type CloseResult, type CloseDeps } from "./close.js";
 export { composeBrief, type ComposeBriefResult, type ComposeBriefDeps } from "./compose-brief.js";
 export { health, type HealthOptions, type HealthResult, type HealthDeps } from "./health.js";
+export { validatePlacement, type ValidatedPlacement } from "./placement.js";
+export { waitForReady, type WaitForReadyOptions, type WaitForReadyResult } from "./wait-ready.js";
