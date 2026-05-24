@@ -9,18 +9,53 @@ import type { Orchestrator } from "@agiterra/crew-tools";
 function stubOrchestrator(opts: {
   tabs?: Record<string, unknown>;
   panes?: Record<string, { tab: string }>;
+  agents?: Record<string, { id: string; pane?: string }>;
 }): Orchestrator {
+  const panes = opts.panes ?? {};
+  const agents = opts.agents ?? {};
   return {
     store: {
       getTab: (name: string) => opts.tabs?.[name],
-      getPane: (name: string) => opts.panes?.[name],
+      getPane: (name: string) => panes[name],
+      listPanes: () => Object.entries(panes).map(([name, p]) => ({ name, ...p })),
+      listAgents: () => Object.values(agents),
     },
   } as unknown as Orchestrator;
 }
 
 describe("validatePlacement", () => {
-  it("returns 'none' when placement is undefined", () => {
+  it("returns 'none' when placement is undefined and no defaultAnchor provided", () => {
     const result = validatePlacement(undefined, stubOrchestrator({}));
+    expect(result.kind).toBe("none");
+  });
+
+  it("default-to-visible: lands near caller when placement omitted and caller has a pane", () => {
+    // The default-to-visible rule: bridge.spawn with no placement should put
+    // the new agent in the caller's workspace, not run it headless. Tests
+    // the synthesized RelativePlacement when defaultAnchor resolves.
+    const result = validatePlacement(
+      undefined,
+      stubOrchestrator({
+        panes: { "loom-pane": { tab: "main" } },
+        agents: { loom: { id: "loom", pane: "loom-pane" } },
+      }),
+      "loom",
+    );
+    expect(result.kind).toBe("relative");
+    if (result.kind === "relative") {
+      expect(result.spec.near).toBe("loom");
+      expect(result.spec.direction).toBe("right");
+    }
+  });
+
+  it("default-to-visible: falls back to 'none' when caller is headless (no resolvable pane)", () => {
+    // Caller has no pane → paneNear throws → we fall back to kind:"none"
+    // (truly detached) so the spawn still succeeds rather than failing.
+    const result = validatePlacement(
+      undefined,
+      stubOrchestrator({ agents: { loom: { id: "loom" } } }),
+      "loom",
+    );
     expect(result.kind).toBe("none");
   });
 

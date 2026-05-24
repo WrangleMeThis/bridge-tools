@@ -98,7 +98,10 @@ export async function spawn(
   // 2. Validate placement BEFORE any non-reversible work. A failed
   //    placement must not leave behind a Wire registration that
   //    permanently consumes the agent_id (HTTP 409 on retry).
-  const validated = validatePlacement(opts.placement, deps.orchestrator);
+  //    parent_agent_id is the default anchor — when opts.placement is
+  //    omitted, the new agent lands in the caller's workspace rather
+  //    than running headless. See placement.ts for the rationale.
+  const validated = validatePlacement(opts.placement, deps.orchestrator, deps.parent_agent_id);
 
   // 3. Wire identity: sponsor a new keypair for the ephemeral.
   const new_keypair: KeyPair = await generateKeyPair();

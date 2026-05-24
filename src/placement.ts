@@ -34,12 +34,39 @@ export type ValidatedPlacement =
  * MUST be called BEFORE any non-reversible work (Wire registration,
  * crew launch). Failed validation should never leave behind partial
  * state.
+ *
+ * `defaultAnchor`: caller's identity. When `placement` is omitted, the
+ * default is to land the new agent in the caller's workspace ("near me,
+ * right of me"). This is the default-to-visible rule — see the comment
+ * in the `if (!placement)` branch. Pass `undefined` to opt out and get
+ * the historical "no placement, agent runs headless" behavior.
  */
 export function validatePlacement(
   placement: Placement | undefined,
   orchestrator: Orchestrator,
+  defaultAnchor?: string,
 ): ValidatedPlacement {
-  if (!placement) return { kind: "none" };
+  if (!placement) {
+    // Default-to-visible: if the caller is anchored to a pane, land the new
+    // agent in the caller's workspace. Operators almost always want to SEE
+    // the agent they just asked to spin up; defaulting to headless creates
+    // orphans on the wire that get forgotten. Caller can still opt into
+    // headless explicitly with `{ detached: true }`.
+    //
+    // If the caller is headless (paneNear can't resolve), fall back to
+    // kind:"none" so the spawn still succeeds — same as the historical
+    // default, but only when there's no workspace to land in.
+    if (defaultAnchor) {
+      try {
+        const spec: RelativePlacement = { near: defaultAnchor, direction: "right" };
+        const resolved = paneNear(spec, { orchestrator });
+        return { kind: "relative", spec, resolved };
+      } catch {
+        return { kind: "none" };
+      }
+    }
+    return { kind: "none" };
+  }
 
   if ("detached" in placement && placement.detached === true) {
     return { kind: "detached" };
