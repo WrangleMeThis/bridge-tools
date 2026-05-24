@@ -92,8 +92,14 @@ export interface SpawnOptions {
 /** Result of a successful spawn. */
 export interface SpawnResult {
   agent_id: string;
-  pane_id?: string;
+  /** Pane name where the new agent's screen is attached (crew pane registry). Undefined if headless. */
   pane_name?: string;
+  /** Backend-specific pane identifier (iterm session id on iTerm, undefined on cmux today). */
+  pane_id?: string;
+  /** Tab containing the new agent's pane. Undefined if headless. */
+  tab?: string;
+  /** PID of the GNU screen process backing the agent. Useful for direct attach/diagnostics. Undefined if headless. */
+  screen_pid?: number;
   wire_identity: string;
   applied_capabilities: string[];
   brief_sent: boolean;

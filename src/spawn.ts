@@ -79,6 +79,19 @@ export async function spawn(
   const new_agent_id = opts.agent_id;
   const display_name = opts.display_name ?? new_agent_id;
 
+  // 0. Require project_dir. Without it, the spawnee inherits the bridge MCP's
+  //    cwd (= the bridge plugin directory) instead of the orchestrator's
+  //    project — almost always wrong. Per Brian 2026-05-24: "the directory
+  //    should be the orchestrator's choice, contingent on the project's needs
+  //    or the user's prompt." Making it required forces that explicit choice
+  //    instead of silently landing the agent in the bridge repo.
+  //    Common call: `project_dir: process.cwd()` to inherit caller's cwd.
+  if (!opts.project_dir) {
+    throw new Error(
+      "spawn: opts.project_dir is required. Pass the working directory the spawnee should start in (e.g. `process.cwd()` to inherit your own cwd, or a project root). Without this, the spawnee silently inherits the bridge plugin's cwd which is almost never what you want.",
+    );
+  }
+
   // 1. Run pre_spawn hooks for declared capabilities.
   const applied_capabilities: string[] = [];
   const hook_env: Record<string, string> = {};
@@ -231,8 +244,21 @@ export async function spawn(
     brief_sent = false;
   }
 
+  // Resolve tab from the pane (relative placement) or from post_launch_attach
+  // (explicit/new_tab/new_workspace). Either source is fine; we just want the
+  // orchestrator to get {tab, pane, screen_pid} in the return so they don't
+  // have to do a discovery dance via crew.tab_list + pane_list after every spawn.
+  let tab: string | undefined = post_launch_attach?.tab;
+  if (!tab && launched.pane) {
+    const paneRow = deps.orchestrator.store.getPane(launched.pane);
+    tab = paneRow?.tab ?? undefined;
+  }
+
   return {
     agent_id: launched.id,
+    pane_name: launched.pane ?? undefined,
+    tab,
+    screen_pid: launched.screen_pid ?? undefined,
     wire_identity: new_agent_id,
     applied_capabilities,
     brief_sent,
