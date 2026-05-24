@@ -11,7 +11,8 @@
 // run-plan is informational only.
 
 import type { SpawnOptions, BridgeHook } from "./types.js";
-import { paneNear, type PaneNearResult } from "./pane-near.js";
+import type { PaneNearResult } from "./pane-near.js";
+import { validatePlacement } from "./placement.js";
 import type { Orchestrator } from "@agiterra/crew-tools";
 
 export interface ComposeBriefResult {
@@ -69,29 +70,48 @@ export function composeBrief(
     ...(opts.env ?? {}),
   };
 
+  // Validate via the same code path spawn uses, so dry-run matches real-run.
+  // A failing validation surfaces as a note rather than throwing — composeBrief
+  // is inspect-only.
   let placement: PaneNearResult | undefined;
-  const p = opts.placement;
-  if (p && "detached" in p && p.detached) {
-    notes.push("Placement is detached — no pane will be created.");
-  } else if (p && "near" in p) {
-    try {
-      placement = paneNear(
-        { near: p.near, direction: p.direction },
-        { orchestrator: deps.orchestrator },
-      );
-    } catch (e) {
-      notes.push(`Placement preview failed: ${(e as Error).message}`);
+  try {
+    // Pass deps.parent_agent_id + the same defaultTabName spawn uses, so
+    // dry-run mirrors real-run's default-to-visible fallback chain.
+    // Historical bug: composeBrief used to diverge from spawn on omitted
+    // placement.
+    const validated = validatePlacement(
+      opts.placement,
+      deps.orchestrator,
+      deps.parent_agent_id,
+      `spawn-${opts.agent_id}`,
+    );
+    switch (validated.kind) {
+      case "none":
+        break;
+      case "detached":
+        notes.push("Placement is detached — no pane will be created.");
+        break;
+      case "relative":
+        placement = validated.resolved;
+        break;
+      case "explicit":
+        notes.push(
+          `Explicit placement: pane will be created in tab '${validated.spec.tab}' ${validated.spec.direction} of '${validated.spec.relative_to}'.`,
+        );
+        break;
+      case "new_tab":
+        notes.push(
+          `New tab placement: tab '${validated.spec.new_tab}' will be created with a default pane.`,
+        );
+        break;
+      case "new_workspace":
+        notes.push(
+          `New workspace placement: workspace/tab '${validated.spec.new_workspace}' will be created with a default pane.`,
+        );
+        break;
     }
-  } else if (p && "relative_to" in p) {
-    notes.push(
-      `Explicit placement: pane will be created in tab '${p.tab}' ${p.direction} of '${p.relative_to}'.`,
-    );
-  } else if (p && "new_tab" in p) {
-    notes.push(`New tab placement: tab '${p.new_tab}' will be created with a default pane.`);
-  } else if (p && "new_workspace" in p) {
-    notes.push(
-      `New workspace placement: workspace/tab '${p.new_workspace}' will be created with a default pane.`,
-    );
+  } catch (e) {
+    notes.push(`Placement validation failed: ${(e as Error).message}`);
   }
 
   return {

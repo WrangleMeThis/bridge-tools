@@ -70,16 +70,51 @@ export interface SpawnOptions {
   runtime?: string;
   /** Working directory for the spawned process. Forwarded to crew.launchAgent. */
   project_dir?: string;
+  /**
+   * If true (default), spawn polls the agent's screen until the
+   * `--dangerously-load-development-channels` consent modal is dismissed
+   * before sending the kickoff brief. Eliminates the race where a fast
+   * close-after-spawn sends `/exit` into the consent modal (which ignores
+   * it) and the agent dies stuck. Set to `false` for a fast fire-and-forget
+   * return — caller is then responsible for not interacting with the agent
+   * until it's ready.
+   */
+  wait_ready?: boolean;
+  /**
+   * Maximum time spawn will wait for the consent modal to clear. Default 15s.
+   * Only honored when `wait_ready` is true. If the deadline expires, spawn
+   * returns with `ready: false` rather than throwing — the brief is still
+   * sent and the caller decides whether to proceed.
+   */
+  ready_timeout_ms?: number;
 }
 
 /** Result of a successful spawn. */
 export interface SpawnResult {
   agent_id: string;
-  pane_id?: string;
+  /** Pane name where the new agent's screen is attached (crew pane registry). Undefined if headless. */
   pane_name?: string;
+  /** Backend-specific pane identifier (iterm session id on iTerm, undefined on cmux today). */
+  pane_id?: string;
+  /** Tab containing the new agent's pane. Undefined if headless. */
+  tab?: string;
+  /** PID of the GNU screen process backing the agent. Useful for direct attach/diagnostics. Undefined if headless. */
+  screen_pid?: number;
   wire_identity: string;
   applied_capabilities: string[];
   brief_sent: boolean;
+  /**
+   * Whether the agent reached an interactive-ready state (past the
+   * dev-channel consent modal) before spawn returned. `undefined` when
+   * `wait_ready` was set to `false`. `false` means the readiness poll
+   * timed out — the agent may still recover, but a close-immediately
+   * dance is racy.
+   */
+  ready?: boolean;
+  /** Whether the dev-channel consent modal was seen during readiness polling. Diagnostic only. */
+  saw_consent?: boolean;
+  /** Elapsed time spent polling for readiness, in milliseconds. Diagnostic only. */
+  ready_elapsed_ms?: number;
 }
 
 /** Context passed to a BridgeHook at runtime. */
