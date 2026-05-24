@@ -40,30 +40,47 @@ export type ValidatedPlacement =
  * right of me"). This is the default-to-visible rule — see the comment
  * in the `if (!placement)` branch. Pass `undefined` to opt out and get
  * the historical "no placement, agent runs headless" behavior.
+ *
+ * `defaultTabName`: tab name to use when the caller can't be resolved as
+ * an anchor (e.g. caller isn't crew-registered). When omitted, the
+ * fallback degrades to `kind:"none"` (headless). When provided, the
+ * fallback creates a fresh tab so the agent is still VISIBLE — the
+ * second tier of "default to visible." Recommended: pass something
+ * derived from the new agent's identity (e.g. `spawn-${agent_id}`).
  */
 export function validatePlacement(
   placement: Placement | undefined,
   orchestrator: Orchestrator,
   defaultAnchor?: string,
+  defaultTabName?: string,
 ): ValidatedPlacement {
   if (!placement) {
-    // Default-to-visible: if the caller is anchored to a pane, land the new
-    // agent in the caller's workspace. Operators almost always want to SEE
-    // the agent they just asked to spin up; defaulting to headless creates
-    // orphans on the wire that get forgotten. Caller can still opt into
-    // headless explicitly with `{ detached: true }`.
+    // Default-to-visible: three-tier fallback.
+    //   1. Anchor on caller's pane → RelativePlacement (lands next to caller)
+    //   2. Caller has no resolvable pane but a defaultTabName is provided
+    //      → NewTabPlacement (still visible, just in a fresh tab)
+    //   3. Truly nothing → kind:"none" (headless, last-resort fallback)
     //
-    // If the caller is headless (paneNear can't resolve), fall back to
-    // kind:"none" so the spawn still succeeds — same as the historical
-    // default, but only when there's no workspace to land in.
+    // Operators almost always want to SEE the agent they just asked to
+    // spin up. Headless creates orphans on the wire that get forgotten.
+    // Caller can still opt into headless explicitly with `{ detached: true }`.
     if (defaultAnchor) {
       try {
         const spec: RelativePlacement = { near: defaultAnchor, direction: "right" };
         const resolved = paneNear(spec, { orchestrator });
         return { kind: "relative", spec, resolved };
       } catch {
-        return { kind: "none" };
+        // Anchor didn't resolve — caller isn't crew-registered (common on
+        // boxes where persistent agents are launched outside crew's pane
+        // tracking). Fall through to NewTabPlacement if we have a name.
       }
+    }
+    if (defaultTabName) {
+      // Use NewWorkspacePlacement (functionally equivalent to NewTab in cmux,
+      // per spawn.ts handler comment) — its required-field surface is just
+      // `new_workspace: string`, which matches what we have. NewTab would
+      // also require a `workspace` field we don't know in the fallback path.
+      return { kind: "new_workspace", spec: { new_workspace: defaultTabName } };
     }
     return { kind: "none" };
   }

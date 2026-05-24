@@ -75,10 +75,16 @@ export function composeBrief(
   // is inspect-only.
   let placement: PaneNearResult | undefined;
   try {
-    // Pass deps.parent_agent_id so dry-run mirrors real-run's default-to-visible
-    // synthesis (omitted placement → land near caller). Historical bug:
-    // composeBrief used to diverge from spawn on omitted placement.
-    const validated = validatePlacement(opts.placement, deps.orchestrator, deps.parent_agent_id);
+    // Pass deps.parent_agent_id + the same defaultTabName spawn uses, so
+    // dry-run mirrors real-run's default-to-visible fallback chain.
+    // Historical bug: composeBrief used to diverge from spawn on omitted
+    // placement.
+    const validated = validatePlacement(
+      opts.placement,
+      deps.orchestrator,
+      deps.parent_agent_id,
+      `spawn-${opts.agent_id}`,
+    );
     switch (validated.kind) {
       case "none":
         break;

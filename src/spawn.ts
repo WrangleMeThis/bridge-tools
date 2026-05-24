@@ -98,10 +98,19 @@ export async function spawn(
   // 2. Validate placement BEFORE any non-reversible work. A failed
   //    placement must not leave behind a Wire registration that
   //    permanently consumes the agent_id (HTTP 409 on retry).
-  //    parent_agent_id is the default anchor — when opts.placement is
-  //    omitted, the new agent lands in the caller's workspace rather
-  //    than running headless. See placement.ts for the rationale.
-  const validated = validatePlacement(opts.placement, deps.orchestrator, deps.parent_agent_id);
+  //    Default-to-visible fallback chain (see placement.ts):
+  //      - omitted placement + caller has a pane → land next to caller
+  //      - omitted placement + caller is unanchored → fresh tab named after
+  //        the new agent (still visible)
+  //      - explicit detached → headless
+  //    The defaultTabName uses new_agent_id so the tab is self-identifying
+  //    if the fresh-tab fallback fires.
+  const validated = validatePlacement(
+    opts.placement,
+    deps.orchestrator,
+    deps.parent_agent_id,
+    `spawn-${new_agent_id}`,
+  );
 
   // 3. Wire identity: sponsor a new keypair for the ephemeral.
   const new_keypair: KeyPair = await generateKeyPair();

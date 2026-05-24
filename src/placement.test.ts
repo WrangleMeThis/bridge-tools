@@ -48,15 +48,49 @@ describe("validatePlacement", () => {
     }
   });
 
-  it("default-to-visible: falls back to 'none' when caller is headless (no resolvable pane)", () => {
-    // Caller has no pane → paneNear throws → we fall back to kind:"none"
-    // (truly detached) so the spawn still succeeds rather than failing.
+  it("default-to-visible: falls back to 'none' when caller is headless AND no defaultTabName", () => {
+    // Caller has no pane → paneNear throws → no defaultTabName → kind:"none"
+    // (truly detached). The spawn still succeeds rather than failing.
     const result = validatePlacement(
       undefined,
       stubOrchestrator({ agents: { loom: { id: "loom" } } }),
       "loom",
     );
     expect(result.kind).toBe("none");
+  });
+
+  it("default-to-visible: falls back to NewWorkspace when caller is unanchored but defaultTabName is provided", () => {
+    // Caller can't be resolved as an anchor (e.g. not crew-registered).
+    // With defaultTabName provided, we spawn in a fresh tab/workspace
+    // instead of going headless. Better default-to-visible than the
+    // original fix because it works on boxes where persistent agents
+    // live outside crew's pane registry. (Uses NewWorkspacePlacement,
+    // which is equivalent to NewTab in cmux per spawn.ts handler.)
+    const result = validatePlacement(
+      undefined,
+      stubOrchestrator({}),  // no agents, no panes
+      "loom",
+      "spawn-testpilot",
+    );
+    expect(result.kind).toBe("new_workspace");
+    if (result.kind === "new_workspace") {
+      expect(result.spec.new_workspace).toBe("spawn-testpilot");
+    }
+  });
+
+  it("default-to-visible: prefers RelativePlacement over NewWorkspace when both anchor AND defaultTabName provided", () => {
+    // Anchor resolves → prefer co-location with caller. NewTab fallback
+    // only fires when anchor fails. This validates the tier ordering.
+    const result = validatePlacement(
+      undefined,
+      stubOrchestrator({
+        panes: { "loom-pane": { tab: "main" } },
+        agents: { loom: { id: "loom", pane: "loom-pane" } },
+      }),
+      "loom",
+      "spawn-testpilot",
+    );
+    expect(result.kind).toBe("relative");
   });
 
   it("returns 'detached' when placement.detached is true (any variant)", () => {
