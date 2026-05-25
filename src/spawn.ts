@@ -134,7 +134,7 @@ export async function spawn(
     deps.parent_signing_key,
     new_agent_id,
     display_name,
-    { pubkey: new_keypair.publicKey },
+    { pubkey: new_keypair.publicKey, force_rotate: opts.force_rotate },
   );
 
   // 4. Assemble env. Precedence (lowest → highest): hook contributions,

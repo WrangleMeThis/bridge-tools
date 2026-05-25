@@ -87,6 +87,14 @@ export interface SpawnOptions {
    * sent and the caller decides whether to proceed.
    */
   ready_timeout_ms?: number;
+  /**
+   * If true, the Wire register call rotates the agent's keypair even when
+   * a row already exists under `agent_id`. Default false — caller hits a
+   * 409 if the id is stale and must clean up the row externally or retry
+   * with this flag. Threads through verbatim to wire-tools
+   * `registerOrRefresh({ force_rotate })`.
+   */
+  force_rotate?: boolean;
 }
 
 /** Result of a successful spawn. */
